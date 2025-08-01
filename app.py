@@ -1,7 +1,9 @@
+import os
 from flask import Flask, request, jsonify
 from fiber_identification import identify_fiber_in_image
 from stroke_identification import identify_stroke_in_image
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 from PIL import Image
 import io
@@ -11,6 +13,12 @@ import base64
 
 app = Flask(__name__)
 CORS(app)
+
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+from predictions.infusion_predict import color_features_infusion_predict
+from predictions.liquid_predict import color_features_liquid_predict
 
 # Function to convert an image array to Base64
 def image_to_base64(image_array):
@@ -75,6 +83,38 @@ def identify_stroke():
         "statistics": stats,
         "result_image": result_base64
     })
+
+@app.route('/predict_liquid', methods=['POST'])
+def predict_liquid():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+
+    file = request.files['image']
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+
+    try:
+        prediction = color_features_liquid_predict(filepath)
+        return jsonify({'prediction': prediction})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/predict_infusion', methods=['POST'])
+def predict_infusion():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+
+    file = request.files['image']
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+    
+    try:
+        prediction = color_features_infusion_predict(filepath)
+        return jsonify({'prediction': prediction})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
