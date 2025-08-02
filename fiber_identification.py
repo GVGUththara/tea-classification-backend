@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 
 # ---- Helper Functions ----
-
 def calculate_longest_distance(contour):
     max_distance = 0
     for i in range(len(contour)):
@@ -48,7 +47,6 @@ def is_inside_box(contour, box_contour):
         return False
 
 # ---- Main Function ----
-
 def identify_fiber_in_image(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY_INV)
@@ -61,24 +59,20 @@ def identify_fiber_in_image(image):
     min_contour_area = 300
     min_fiber_area = 300
     max_fiber_area = 905
-    min_fiber_height = 50
+    min_fiber_height = 75
     elongation_lower = 1.1
     elongation_upper = 5.5
-    solidity_lower = 0.20
-    solidity_upper = 0.82
-    pa_ratio_lower = 0.21
-    pa_ratio_upper = 0.54
+    pa_ratio_lower = 0.20
+    pa_ratio_upper = 0.60
 
     segmented_image = np.full_like(image, 255, dtype=np.uint8)
     thin_particles_image = np.full_like(image, 255, dtype=np.uint8)
     mask = np.zeros_like(gray)
 
-    box_contour = get_largest_box_contour(contours, image.shape)
-    if box_contour is not None:
-        box_mask = np.zeros_like(gray)
-        cv2.drawContours(box_mask, [box_contour], -1, 255, cv2.FILLED)
+    thin_particles = []
 
-    # Draw main valid particles
+    box_contour = get_largest_box_contour(contours, image.shape)
+
     for i, contour in enumerate(contours):
         if is_inside_box(contour, box_contour):
             continue
@@ -86,72 +80,63 @@ def identify_fiber_in_image(image):
             cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
     segmented_image[mask == 255] = image[mask == 255]
 
-    # Draw contours + annotate
     for i, contour in enumerate(contours):
         if is_inside_box(contour, box_contour):
             continue
-        if cv2.contourArea(contour) > min_contour_area:
-            cv2.drawContours(segmented_image, [contour], -1, (0, 255, 0), 2)
-            if hierarchy[0][i][3] != -1:
-                cv2.drawContours(segmented_image, [contour], -1, (255, 255, 255), cv2.FILLED)
 
-    # Analyze fibers
-    thin_particles = []
-    for i, contour in enumerate(contours):
-        if is_inside_box(contour, box_contour):
+        area = cv2.contourArea(contour)
+        if area <= min_contour_area:
             continue
-        if hierarchy[0][i][3] == -1 and not is_contour_touching_boundary(contour, image.shape):
-            area = cv2.contourArea(contour)
-            if min_fiber_area <= area <= max_fiber_area:
-                rect = cv2.minAreaRect(contour)
-                width, height = rect[1]
-                if min(width, height) == 0:
-                    continue
-                elongation = max(width, height) / min(width, height)
 
-                hull = cv2.convexHull(contour)
-                hull_area = cv2.contourArea(hull)
-                if hull_area == 0:
-                    continue
-                solidity = area / hull_area
+        cv2.drawContours(segmented_image, [contour], -1, (0, 255, 0), 2)
+        if hierarchy[0][i][3] != -1:
+            cv2.drawContours(segmented_image, [contour], -1, (255, 255, 255), cv2.FILLED)
 
-                perimeter = cv2.arcLength(contour, True)
-                pa_ratio = perimeter / area if area != 0 else 0
+        rect = cv2.minAreaRect(contour)
+        width, height = rect[1]
+        if min(width, height) == 0:
+            continue
+        elongation = max(width, height) / min(width, height)
 
-                height_longest = calculate_longest_distance(contour)
+        perimeter = cv2.arcLength(contour, True)
+        pa_ratio = perimeter / area if area != 0 else 0
 
-                # Centroid
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cX = int(M["m10"] / M["m00"])
-                    cY = int(M["m01"] / M["m00"])
-                else:
-                    cX, cY = contour[0][0][0], contour[0][0][1]
+        height_longest = calculate_longest_distance(contour)
 
-                text = f"A:{int(area)} E:{elongation:.1f} S:{solidity:.2f} P/A:{pa_ratio:.2f}"
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+        else:
+            cX, cY = contour[0][0][0], contour[0][0][1]
 
-                if (elongation_lower <= elongation <= elongation_upper and
-                    solidity_lower <= solidity <= solidity_upper and
-                    pa_ratio_lower <= pa_ratio <= pa_ratio_upper and
-                    height_longest > min_fiber_height):
+        text = f"A:{int(area)} E:{elongation:.1f} H:{int(height_longest)} P/A:{pa_ratio:.2f}"
+        cv2.putText(segmented_image, text, (cX, cY),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
 
-                    thin_particles.append(contour)
-                    mask = np.zeros_like(gray)
-                    cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
-                    thin_particles_image[mask == 255] = image[mask == 255]
-                    cv2.putText(thin_particles_image, text, (cX, cY),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-
-                # Annotate on segmented image regardless
-                cv2.putText(segmented_image, text, (cX, cY),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+        if (
+            min_fiber_area <= area <= max_fiber_area and
+            elongation_lower <= elongation <= elongation_upper and
+            pa_ratio_lower <= pa_ratio <= pa_ratio_upper and
+            height_longest > min_fiber_height and
+            hierarchy[0][i][3] == -1 and
+            not is_contour_touching_boundary(contour, image.shape)
+        ):
+            thin_particles.append(contour)
+            mask = np.zeros_like(gray)
+            cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
+            thin_particles_image[mask == 255] = image[mask == 255]
+            cv2.putText(thin_particles_image, text, (cX, cY),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
 
     total_particles = sum(
         1 for i in range(len(contours))
-        if (cv2.contourArea(contours[i]) > min_contour_area and
+        if (
+            cv2.contourArea(contours[i]) > min_contour_area and
             not is_contour_touching_boundary(contours[i], image.shape) and
             hierarchy[0][i][3] == -1 and
-            not is_inside_box(contours[i], box_contour))
+            not is_inside_box(contours[i], box_contour)
+        )
     )
 
     average_ratio = len(thin_particles) / total_particles if total_particles > 0 else 0

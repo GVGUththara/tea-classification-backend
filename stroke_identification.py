@@ -3,6 +3,12 @@ import numpy as np
 
 # ---- Helper Functions ----
 
+def is_contour_touching_boundary(contour, image_shape):
+    for point in contour:
+        if point[0][0] <= 0 or point[0][0] >= image_shape[1] - 1 or point[0][1] <= 0 or point[0][1] >= image_shape[0] - 1:
+            return True
+    return False
+
 def is_contour_inner(contour_index, hierarchy):
     return hierarchy[0][contour_index][3] != -1
 
@@ -45,10 +51,10 @@ def identify_stroke_in_image(image):
     if hierarchy is None:
         return image, {"error": "No contours found"}
 
-    # Parameters
-    r_lower_bound, r_upper_bound = 80, 230
-    g_lower_bound, g_upper_bound = 40, 200
-    b_lower_bound, b_upper_bound = 20, 150
+    # ---- Parameters ----
+    r_lower_bound, r_upper_bound = 90, 240
+    g_lower_bound, g_upper_bound = 50, 210
+    b_lower_bound, b_upper_bound = 20, 160
     gray_diff_threshold = 15
 
     min_contour_area = 50
@@ -67,7 +73,8 @@ def identify_stroke_in_image(image):
 
         if (min_contour_area < contour_area < large_contour_area and
             not is_contour_inner(i, hierarchy) and
-            not is_inside_box(contour, box_contour)):
+            not is_inside_box(contour, box_contour) and
+            not is_contour_touching_boundary(contour, image.shape)):
 
             mask = np.zeros_like(gray)
             cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
@@ -97,18 +104,20 @@ def identify_stroke_in_image(image):
                 brown_g_values.extend(g_values)
                 brown_b_values.extend(b_values)
 
-    # Output image
+    # ---- Create Output Image ----
     filtered_background = np.full_like(image, (255, 255, 255), dtype=np.uint8)
     for contour in filtered_contours:
         mask = np.zeros_like(gray)
         cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED)
         filtered_background[mask == 255] = image[mask == 255]
 
+    # ---- Stats ----
     number_of_external_contours = sum(
         1 for i in range(len(contours))
         if (min_contour_area < cv2.contourArea(contours[i]) < large_contour_area and
             not is_contour_inner(i, hierarchy) and
-            not is_inside_box(contours[i], box_contour))
+            not is_inside_box(contours[i], box_contour) and
+            not is_contour_touching_boundary(contours[i], image.shape))
     )
 
     brown_particle_ratio = (
@@ -116,11 +125,24 @@ def identify_stroke_in_image(image):
         if number_of_external_contours > 0 else 0
     )
 
+    average_all_r = np.mean(all_r_values) if all_r_values else 0
+    average_all_g = np.mean(all_g_values) if all_g_values else 0
+    average_all_b = np.mean(all_b_values) if all_b_values else 0
+
+    average_brown_r = np.mean(brown_r_values) if brown_r_values else 0
+    average_brown_g = np.mean(brown_g_values) if brown_g_values else 0
+    average_brown_b = np.mean(brown_b_values) if brown_b_values else 0
+
     stats = {
         "number_of_external_contours": number_of_external_contours,
         "number_of_brown_particles": len(filtered_contours),
-        "brown_particle_ratio": round(brown_particle_ratio, 2)
+        "brown_particle_ratio": round(brown_particle_ratio, 2),
+        "average_all_r": round(average_all_r, 2),
+        "average_all_g": round(average_all_g, 2),
+        "average_all_b": round(average_all_b, 2),
+        "average_brown_r": round(average_brown_r, 2),
+        "average_brown_g": round(average_brown_g, 2),
+        "average_brown_b": round(average_brown_b, 2)
     }
-
 
     return filtered_background, stats
